@@ -1,0 +1,42 @@
+Code example
+"use strict';
+
+const Injector = require('trx_util/_injector');
+const INJECTOR_CONFIG = require('../inject');
+const DEFAULT_INJECTOR_DATABASE_NUMBER = -1;
+const SECRET = require('trx_config/auth/secret');
+
+module.exports = function constructInjectorPerDatabaseMiddleware(injectorCache) {
+return function * (next) {
+const repositoryId = this.params.repositoryId;
+let databaseNumber;
+let _repository;
+
+if (repositoryId != null) {
+if (!this.session.user && this.request.get('X-Trx-Auth') === SECRET) {
+// This assumes that this middleware is used together with sessionOrAuthHeaderCheck or sessionCheck.
+// If there is no user session, then it must be a microservice-to-microservice call with auth header secret
+databaseNumber = this.query.rdb;
+} else {
+_repository = this.session.user.repositories[repositoryId];
+if (_repository == null) this.throw(403, 'Not accessible repository for the user according to the provided repositoryId');
+databaseNumber = _repository.databaseNumber;
+}
+} else {
+databaseNumber = DEFAULT_INJECTOR_DATABASE_NUMBER;
+}
+
+if (!injectorCache[databaseNumber]) {
+const $injector = new Injector(INJECTOR_CONFIG);
+const userDatabaseProvider = $injector.get('UserDatabaseProvider');
+$injector.defineConstant('ETL_DATABASE_NUMBER', databaseNumber);
+$injector.defineConstant('EtlDatabase', userDatabaseProvider.getDatabase(databaseNumber));
+
+injectorCache[databaseNumber] = $injector;
+}
+
+this.$injector = injectorCache[databaseNumber];
+
+yield next;
+};
+};
